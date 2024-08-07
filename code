@@ -1,0 +1,144 @@
+local module = {}
+
+-- variables
+local replicatedStorage = game:GetService('ReplicatedStorage')
+local remoteFolder = replicatedStorage:WaitForChild('Remotes')
+local cleanHitboxEvent = remoteFolder:WaitForChild('CleanHitboxes')
+local beamEvent = remoteFolder:WaitForChild('Beam')
+local camera = workspace.CurrentCamera
+local beamWindup = Instance.new('Animation') do 
+	beamWindup.AnimationId = 'rbxassetid://18816453289'
+end
+local beamAnimation = Instance.new('Animation') do 
+	beamAnimation.AnimationId = 'rbxassetid://18816468160'
+end
+local fire = replicatedStorage:WaitForChild('Fire')
+local fireHitbox = replicatedStorage:WaitForChild('Hitbox')
+local runService = game:GetService('RunService')
+local toolAnimations = {'182393478', '129967390', '129967478'}
+local handleHitbox = remoteFolder:WaitForChild('HandleFireHitbox')
+local updateOrientation = remoteFolder:WaitForChild('UpdateOrientation')
+local networkRemote = remoteFolder:WaitForChild('NetworkRemote')
+
+-- functions
+function module.stun(player, toggle)
+	local humanoid = player.Character.Humanoid
+	
+	if toggle then
+		player.Character.HumanoidRootPart.Anchored = true
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+	else 
+		player.Character.HumanoidRootPart.Anchored = false
+		humanoid.WalkSpeed = 16
+		humanoid.JumpPower = 50
+	end
+end
+
+function module.cleanupEvent(player)
+	local animator = player.Character.Humanoid.Animator
+	
+	for i,v in animator:GetPlayingAnimationTracks() do 
+		if not v.Animation.AnimationId:match(toolAnimations[1]) and not v.Animation.AnimationId:match(toolAnimations[2]) and not v.Animation.AnimationId:match(toolAnimations[3]) then
+			if v.Priority ~= Enum.AnimationPriority.Core then
+				v:Stop()
+			end
+		end
+	end
+	
+	for i,v in workspace:GetChildren() do 
+		if v.Name:match(player.Name) and v:IsA('BasePart') then
+			v:Destroy()
+		end
+	end	
+	
+	module.stun(player, false)
+end
+
+function module.updatePlayerRotation(player)
+	player.Character.HumanoidRootPart.CFrame = player.Character.HumanoidRootPart.CFrame
+end
+
+function module.spawnFire(player, toggle)
+	if not toggle then
+		module.cleanupEvent(player)
+	end
+	
+	if toggle then
+		module.stun(player, true)
+		
+		local foundFlame = workspace:FindFirstChild(player.Name.. 'fire')
+		local character = player.Character
+		local root = character.HumanoidRootPart
+		local humanoid = character.Humanoid
+		local animator = humanoid.Animator
+		
+		if not foundFlame then
+			local windupAnimation = animator:LoadAnimation(beamWindup)
+			
+			windupAnimation:Play()
+			
+			task.wait(0.65)
+			
+			local beamAnimation = animator:LoadAnimation(beamAnimation)
+			
+			beamAnimation.Looped = true
+			
+			beamAnimation:Play()
+			
+			local newFlame = fire:Clone()
+			local newHitbox = fireHitbox:Clone()
+			
+			newFlame.Parent = workspace
+			newFlame.Name = player.Name..'fire'
+			
+			newHitbox.Parent = workspace
+			newHitbox.Name = player.Name..'hitbox'
+			newHitbox.Transparency = 0.5
+			newHitbox.BrickColor = BrickColor.new('Really red')
+			
+			task.spawn(function()			
+				while newFlame.Parent == workspace do 
+					newFlame.CFrame = root.CFrame * CFrame.new(0, 0, newFlame.Size.Z * 2 * -1) * CFrame.Angles(0, math.rad(90), 0)
+					newHitbox.CFrame = root.CFrame * CFrame.new(0, 0, newHitbox.Size.Z * 2 * -1) * CFrame.Angles(0, math.rad(90), 0)
+					runService.RenderStepped:Wait()
+				end
+			end)
+			
+			return newHitbox
+		end
+	end
+end
+
+function module.query(player, hitbox)
+	local queryParams = OverlapParams.new()
+	queryParams.FilterType = Enum.RaycastFilterType.Exclude
+	queryParams.FilterDescendantsInstances = {workspace.Baseplate, player.Character, workspace[player.Name..'hitbox'], workspace[player.Name..'fire']}
+	
+	local box = workspace:GetPartBoundsInBox(hitbox.CFrame, hitbox.Size, queryParams)
+	
+	for i,v in box do 
+		if v.Parent:FindFirstChild('Humanoid') then
+			handleHitbox:FireServer(v.Parent)
+			break
+		end
+	end
+end
+
+function module.handleHitbox(player, toggle)
+	local hitbox = module.spawnFire(player, toggle)
+	
+	if hitbox then
+		while hitbox.Parent == workspace do
+			module.query(player, hitbox)
+			task.wait(0.25)
+		end
+	end
+end
+
+-- events
+beamEvent.OnClientEvent:Connect(module.handleHitbox)
+cleanHitboxEvent.OnClientEvent:Connect(module.cleanupEvent)
+updateOrientation.OnClientEvent:Connect(module.updatePlayerRotation)
+
+return module
